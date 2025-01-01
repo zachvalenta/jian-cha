@@ -15,6 +15,7 @@ def is_git_repo(directory):
 
 
 def get_git_info(directory):
+    """Retrieve Git information for the repository."""
     try:
         branch = subprocess.check_output(
             ["git", "-C", directory, "rev-parse", "--abbrev-ref", "HEAD"],
@@ -29,12 +30,14 @@ def get_git_info(directory):
             text=True
         )
         clean = not bool(status_output.strip())
+        print(f"[DEBUG] Directory: {directory}, Clean: {clean}")
         return {
             "branch": branch,
             "last_commit": last_commit,
             "clean": clean
         }
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
+        print(f"[DEBUG] Error retrieving git info for {directory}: {e}")
         return None
 
 
@@ -61,25 +64,28 @@ def main(config_path):
                 "directory": str(dir_path),
                 "branch": git_info["branch"],
                 "last_commit": git_info["last_commit"],
-                "clean": "Yes" if git_info["clean"] else "No",
+                "clean": git_info["clean"],
                 "error": None
             })
         else:
             results.append({"directory": str(dir_path), "error": "Failed to retrieve Git info"})
     console = Console()
-    table = Table(title="Git Repository Overview")
+    table = Table(title="Git Repository Overview", show_lines=True)
     table.add_column("Directory", style="cyan", no_wrap=True)
     table.add_column("Branch", style="magenta")
     table.add_column("Clean", style="green")
     table.add_column("Last Commit", style="yellow", overflow="fold")
     table.add_column("Error", style="red")
     for result in results:
+        print(f"[DEBUG] Result: {result}")
+        style = "on red" if result.get("clean") is False else None
         table.add_row(
             result.get("directory", ""),
             result.get("branch", ""),
-            result.get("clean", ""),
+            "Yes" if result.get("clean") else "No",
             result.get("last_commit", ""),
-            result.get("error", "") or "-"
+            result.get("error", "") or "-",
+            style=style
         )
     console.print(table)
 
