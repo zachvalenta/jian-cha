@@ -20,7 +20,7 @@ help:
 #
 
 run:
-	python app.py config.json
+	python app.py
 
 repl:
 	export PYTHONSTARTUP='./startup.py' && ipython

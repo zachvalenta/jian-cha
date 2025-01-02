@@ -1,3 +1,4 @@
+import getpass
 import json
 from pathlib import Path
 import subprocess
@@ -40,8 +41,8 @@ def get_git_info(directory):
         return None
 
 
-def main(config_path):
-    config = load_config(config_path)
+def main():
+    config = load_config()
     directories = config.get("directories", [])
     results = []
     for directory in directories:
@@ -100,14 +101,11 @@ def main(config_path):
     console.print(table)
 
 
-def load_config(config_path):
+def load_config():
+    config_path = 'config-home.json' if getpass.getuser() == 'zach' else 'config-work.json'
     with open(config_path, "r") as f:
         return json.load(f)
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python script.py <config.json>")
-        exit(1)
-    main(sys.argv[1])
+    main()
