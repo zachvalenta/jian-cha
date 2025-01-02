@@ -7,9 +7,10 @@ This is a tool to:
 
 # ☑️  TODO
 
-* handle parents (in addition to leaves)
-* CLI
-* publish
+- [x] alias for CLI
+- [ ] handle parents (in addition to leaves)
+- [ ] publish
+- [ ] handle multiple statuses
 
 # 🎛️ USAGE
 
