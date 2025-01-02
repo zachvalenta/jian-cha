@@ -18,7 +18,7 @@ def is_git_repo(directory):
 def get_git_info(directory):
     try:
         branch = subprocess.check_output(["git", "-C", directory, "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
-        last_commit = subprocess.check_output(["git", "-C", directory, "log", "-1", "--pretty=%B"], text=True).strip()
+        last_commit = subprocess.check_output(["git", "-C", directory, "log", "-1", "--pretty=%s"], text=True).strip()
         status_output = subprocess.check_output(["git", "-C", directory, "status", "--porcelain"], text=True)
         clean = not bool(status_output.strip())
         try:
