@@ -15,27 +15,12 @@ def is_git_repo(directory):
 
 
 def get_git_info(directory):
-    """Retrieve Git information for the repository."""
     try:
-        branch = subprocess.check_output(
-            ["git", "-C", directory, "rev-parse", "--abbrev-ref", "HEAD"],
-            text=True
-        ).strip()
-        last_commit = subprocess.check_output(
-            ["git", "-C", directory, "log", "-1", "--pretty=%B"],
-            text=True
-        ).strip()
-        status_output = subprocess.check_output(
-            ["git", "-C", directory, "status", "--porcelain"],
-            text=True
-        )
+        branch = subprocess.check_output( ["git", "-C", directory, "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        last_commit = subprocess.check_output( ["git", "-C", directory, "log", "-1", "--pretty=%B"], text=True).strip()
+        status_output = subprocess.check_output( ["git", "-C", directory, "status", "--porcelain"], text=True)
         clean = not bool(status_output.strip())
-        print(f"[DEBUG] Directory: {directory}, Clean: {clean}")
-        return {
-            "branch": branch,
-            "last_commit": last_commit,
-            "clean": clean
-        }
+        return { "branch": branch, "last_commit": last_commit, "clean": clean }
     except subprocess.CalledProcessError as e:
         print(f"[DEBUG] Error retrieving git info for {directory}: {e}")
         return None
@@ -70,22 +55,21 @@ def main(config_path):
         else:
             results.append({"directory": str(dir_path), "error": "Failed to retrieve Git info"})
     console = Console()
-    table = Table(title="Git Repository Overview", show_lines=True)
+    table = Table(title="REPO SYNC CHECKUP", show_lines=True)
     table.add_column("Directory", style="cyan", no_wrap=True)
     table.add_column("Branch", style="magenta")
-    table.add_column("Clean", style="green")
+    table.add_column("Clean", style="", justify="center")
     table.add_column("Last Commit", style="yellow", overflow="fold")
     table.add_column("Error", style="red")
     for result in results:
-        print(f"[DEBUG] Result: {result}")
-        style = "on red" if result.get("clean") is False else None
+        status_symbol = "✓" if result.get("clean") else "✗"
+        status_style = "green" if result.get("clean") else "red"
         table.add_row(
             result.get("directory", ""),
             result.get("branch", ""),
-            "Yes" if result.get("clean") else "No",
+            f"[{status_style}]{status_symbol}[/]",  # Inline style just for the symbol
             result.get("last_commit", ""),
             result.get("error", "") or "-",
-            style=style
         )
     console.print(table)
 
