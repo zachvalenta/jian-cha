@@ -8,6 +8,7 @@ This is a tool to:
 # ☑️  TODO
 
 - [x] alias for CLI
+- [ ] check upstream
 - [ ] handle parents (in addition to leaves)
 - [ ] publish
 - [ ] handle multiple statuses
