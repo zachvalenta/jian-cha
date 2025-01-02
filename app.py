@@ -16,19 +16,28 @@ def is_git_repo(directory):
 
 def get_git_info(directory):
     try:
-        branch = subprocess.check_output( ["git", "-C", directory, "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
-        last_commit = subprocess.check_output( ["git", "-C", directory, "log", "-1", "--pretty=%B"], text=True).strip()
-        status_output = subprocess.check_output( ["git", "-C", directory, "status", "--porcelain"], text=True)
+        branch = subprocess.check_output(["git", "-C", directory, "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        last_commit = subprocess.check_output(["git", "-C", directory, "log", "-1", "--pretty=%B"], text=True).strip()
+        status_output = subprocess.check_output(["git", "-C", directory, "status", "--porcelain"], text=True)
         clean = not bool(status_output.strip())
-        return { "branch": branch, "last_commit": last_commit, "clean": clean }
+        try:
+            unpushed_count = subprocess.check_output(
+                ["git", "-C", directory, "rev-list", "@{u}..HEAD", "--count"],
+                text=True,
+                stderr=subprocess.DEVNULL
+            ).strip()
+            has_unpushed = int(unpushed_count) > 0
+        except subprocess.CalledProcessError:
+            has_unpushed = None  # if no upstream
+        return {
+            "branch": branch,
+            "last_commit": last_commit,
+            "clean": clean,
+            "has_unpushed": has_unpushed
+        }
     except subprocess.CalledProcessError as e:
         print(f"[DEBUG] Error retrieving git info for {directory}: {e}")
         return None
-
-
-def load_config(config_path):
-    with open(config_path, "r") as f:
-        return json.load(f)
 
 
 def main(config_path):
@@ -50,6 +59,7 @@ def main(config_path):
                 "branch": git_info["branch"],
                 "last_commit": git_info["last_commit"],
                 "clean": git_info["clean"],
+                "has_unpushed": git_info["has_unpushed"],
                 "error": None
             })
         else:
@@ -58,20 +68,41 @@ def main(config_path):
     table = Table(title="REPO SYNC CHECKUP", show_lines=True)
     table.add_column("Directory", style="cyan", no_wrap=True)
     table.add_column("Branch", style="magenta")
-    table.add_column("Clean", style="", justify="center")
+    table.add_column("Status", style="", justify="center")
     table.add_column("Last Commit", style="yellow", overflow="fold")
     table.add_column("Error", style="red")
     for result in results:
-        status_symbol = "✓" if result.get("clean") else "✗"
-        status_style = "green" if result.get("clean") else "red"
+        if result.get("error"):
+            status_symbol = "?"
+            status_style = "yellow"
+        else:
+            clean = result.get("clean")
+            has_unpushed = result.get("has_unpushed")
+            if clean and has_unpushed is False:
+                status_symbol = "✓"
+                status_style = "green"
+            elif clean and has_unpushed is True:
+                status_symbol = "↑"
+                status_style = "yellow"
+            elif clean and has_unpushed is None:
+                status_symbol = "⚠"
+                status_style = "yellow"
+            else:
+                status_symbol = "✗"
+                status_style = "red"
         table.add_row(
             result.get("directory", ""),
             result.get("branch", ""),
-            f"[{status_style}]{status_symbol}[/]",  # Inline style just for the symbol
+            f"[{status_style}]{status_symbol}[/]",
             result.get("last_commit", ""),
             result.get("error", "") or "-",
         )
     console.print(table)
+
+
+def load_config(config_path):
+    with open(config_path, "r") as f:
+        return json.load(f)
 
 
 if __name__ == "__main__":
