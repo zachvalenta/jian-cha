@@ -6,10 +6,9 @@
         "/Users/zvalenta/Documents/denv/bin",
         "/Users/zvalenta/Documents/denv/logs",
         "/Users/zvalenta/Documents/denv/dotfiles",
-        "/Users/zvalenta/Documents/capp/worklogs",
-        "/Users/zvalenta/Documents/capp/task-mgmt",
-        "/Users/zvalenta/Documents/capp/handbook",
-        "/Users/zvalenta/Documents/capp/brand-enablement",
-        "/Users/zvalenta/Documents/capp/edi"
+        "/Users/zvalenta/Documents/capp/notes/worklogs",
+        "/Users/zvalenta/Documents/capp/notes/task-mgmt",
+        "/Users/zvalenta/Documents/capp/notes/handbook",
+        "/Users/zvalenta/Documents/capp/src/cleanup"
     ]
 }
