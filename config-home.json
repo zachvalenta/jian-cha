@@ -6,10 +6,10 @@
         "/Users/zach/Documents/denv/bin",
         "/Users/zach/Documents/denv/logs",
         "/Users/zach/Documents/denv/dotfiles",
-        "/Users/zach/Documents/zv/capp/worklogs",
-        "/Users/zach/Documents/zv/capp/task-mgmt",
-        "/Users/zach/Documents/zv/capp/handbook",
-        "/Users/zach/Documents/zv/capp/brand-enablement",
-        "/Users/zach/Documents/zv/capp/edi/capp-edi"
+        "/Users/zach/Documents/zv/capp/notes/worklogs",
+        "/Users/zach/Documents/zv/capp/notes/task-mgmt",
+        "/Users/zach/Documents/zv/capp/notes/handbook",
+        "/Users/zach/Documents/zv/capp/src/cleanup",
+        "/Users/zach/Documents/zv/capp/src/crud"
     ]
 }
