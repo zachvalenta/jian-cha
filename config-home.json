@@ -9,6 +9,10 @@
         "/Users/zach/Documents/zv/capp/notes/worklogs",
         "/Users/zach/Documents/zv/capp/notes/handbook",
         "/Users/zach/Documents/zv/capp/src/rn/datalab",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/dongan"
+        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/dongan",
+        "/Users/zach/Documents/zv/capp/src/backlog/dataload",
+        "/Users/zach/Documents/zv/capp/src/backlog/fuzzy-match",
+        "/Users/zach/Documents/zv/capp/src/backlog/pricing",
+        "/Users/zach/Documents/zv/capp/src/backlog/rfq"
     ]
 }
