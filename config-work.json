@@ -9,6 +9,7 @@
         "/Users/zvalenta/Documents/capp/worklogs",
         "/Users/zvalenta/Documents/capp/src/rn/datalab",
         "/Users/zvalenta/Documents/capp/src/rn/kern",
+        "/Users/zvalenta/Documents/capp/src/rn/rfq-notebook",
         "/Users/zvalenta/Documents/capp/src/rn/price-updates/brands/baso",
         "/Users/zvalenta/Documents/capp/src/rn/price-updates/brands/aaon",
         "/Users/zvalenta/Documents/capp/src/rn/price-updates/brands/copeland",
@@ -18,7 +19,6 @@
         "/Users/zvalenta/Documents/capp/src/rn/price-updates/brands/baldor-motors",
         "/Users/zvalenta/Documents/capp/src/rn/price-updates/brands/uei",
         "/Users/zvalenta/Documents/capp/src/backlog/fuzzy-match",
-        "/Users/zvalenta/Documents/capp/src/backlog/pfp",
-        "/Users/zvalenta/Documents/capp/src/backlog/rfq"
+        "/Users/zvalenta/Documents/capp/src/backlog/pfp"
     ]
 }
