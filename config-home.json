@@ -2,24 +2,10 @@
     "directories": [
         "/Users/zach/Documents/zv/notes/sw",
         "/Users/zach/Documents/zv/notes/domains",
+        "/Users/zach/Documents/zv/capp/src/rn/kern",
         "/Users/zach/Documents/zv/materials/sw/lang/html-css/myblog",
         "/Users/zach/Documents/denv/bin",
         "/Users/zach/Documents/denv/logs",
-        "/Users/zach/Documents/denv/dotfiles",
-        "/Users/zach/Documents/zv/capp/worklogs",
-        "/Users/zach/Documents/zv/capp/src/rn/datalab",
-        "/Users/zach/Documents/zv/capp/src/rn/kern",
-        "/Users/zach/Documents/zv/capp/src/rn/rfq-notebook",
-        "/Users/zach/Documents/zv/capp/src/rn/customer-quote-history",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/baso",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/aaon",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/copeland",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/reznor",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/bradford",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/mitsubishi-electric",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/baldor-motors",
-        "/Users/zach/Documents/zv/capp/src/rn/price-updates/brands/uei",
-        "/Users/zach/Documents/zv/capp/src/backlog/fuzzy-match",
-        "/Users/zach/Documents/zv/capp/src/backlog/pfp"
+        "/Users/zach/Documents/denv/dotfiles"
     ]
 }
