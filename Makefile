@@ -4,7 +4,9 @@ help:
 	@echo
 	@echo "🚀  MAIN"
 	@echo
-	@echo "run:       run app"
+	@echo "build:     build Rust binary to project root"
+	@echo "run:       run Rust app"
+	@echo "run-py:    run Python app"
 	@echo "repl:      start REPL"
 	@echo
 	@echo "📦 DEPENDENCIES"
@@ -19,7 +21,14 @@ help:
 # 🚀  MAIN
 #
 
+build:
+	cargo build --release
+	cp target/release/jian-cha ./jian-cha
+
 run:
+	./jian-cha
+
+run-py:
 	python app.py
 
 repl:
