@@ -215,8 +215,8 @@ fn main() {
             .unwrap_or_else(|| "UNKNOWN".to_string());
 
         println!();
-        // Print section header with bold and white color
-        println!("\x1b[1;37m{}\x1b[0m", parent_name);
+        // Print section header with bold, underline, and white color
+        println!("\x1b[1;4;37m{}\x1b[0m", parent_name);
 
         let mut table = Table::new();
         table
