@@ -1,5 +1,5 @@
 use comfy_table::presets::ASCII_FULL;
-use comfy_table::{Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
+use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -287,7 +287,7 @@ fn main() {
             table.add_row(vec![
                 Cell::new(truncated_repo),
                 Cell::new(truncated_branch),
-                Cell::new(status_symbol).fg(status_color),
+                Cell::new(status_symbol).fg(status_color).add_attribute(Attribute::Bold),
                 Cell::new(truncated_commit),
                 Cell::new(truncated_error),
             ]);
