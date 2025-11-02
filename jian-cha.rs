@@ -215,8 +215,8 @@ fn main() {
             .unwrap_or_else(|| "UNKNOWN".to_string());
 
         println!();
-        // Print section header with bold, underline, and white color
-        println!("\x1b[1;4;37m{}\x1b[0m", parent_name);
+        // Print section header with bold, underline, and darkorange color
+        println!("\x1b[1;4;38;2;255;140;0m{}\x1b[0m", parent_name);
 
         let mut table = Table::new();
         table
@@ -225,8 +225,8 @@ fn main() {
             .set_header(vec![
                 Cell::new("Repository").fg(Color::Cyan),
                 Cell::new("Branch").fg(Color::Magenta),
-                Cell::new("Status").fg(Color::Yellow),
-                Cell::new("Last Commit").fg(Color::Yellow),
+                Cell::new("Status").fg(Color::Rgb { r: 119, g: 136, b: 153 }),  // lightslategrey
+                Cell::new("Last Commit").fg(Color::Rgb { r: 184, g: 134, b: 11 }),  // darkgoldenrod
                 Cell::new("Error").fg(Color::Red),
             ]);
 
