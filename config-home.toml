@@ -5,14 +5,16 @@ docs = "/Users/zach/Documents/zv/work/kero/docs"
 rush = "/Users/zach/Documents/zv/work/kero/rush"
 
 [denv]
-bin = "/Users/zach/Documents/denv/bin"
-logs = "/Users/zach/Documents/denv/logs"
-dotfiles = "/Users/zach/Documents/denv/dotfiles"
+# bin = "/Users/zach/Documents/denv/bin"
+# logs = "/Users/zach/Documents/denv/logs"
+# dotfiles = "/Users/zach/Documents/denv/dotfiles"
 
 [notes]
 sw = "/Users/zach/Documents/zv/notes/sw"
 domains = "/Users/zach/Documents/zv/notes/domains"
 
 [projects]
-myblog = "/Users/zach/Documents/zv/projects/active/sites/myblog"
-mongo-fk = "/Users/zach/Documents/zv/projects/active/mongo-fk"
+# myblog = "/Users/zach/Documents/zv/projects/active/sites/myblog"
+baby-track = "/Users/zach/Documents/zv/projects/active/baby-track"
+jmore = "/Users/zach/Documents/zv/projects/active/mongo/jmore"
+wt-nosql = "/Users/zach/Documents/zv/projects/active/mongo/wt-nosql"
