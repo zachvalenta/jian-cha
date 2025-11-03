@@ -7,7 +7,8 @@ use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
-    directories: Vec<String>,
+    #[serde(flatten)]
+    sections: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug)]
@@ -90,13 +91,13 @@ fn get_git_info(directory: &Path) -> Option<GitInfo> {
 fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     let username = std::env::var("USER").unwrap_or_else(|_| String::from("unknown"));
     let config_path = if username == "zach" {
-        "config-home.json"
+        "config-home.toml"
     } else {
-        "config-work.json"
+        "config-work.toml"
     };
 
     let contents = std::fs::read_to_string(config_path)?;
-    let config: Config = serde_json::from_str(&contents)?;
+    let config: Config = toml::from_str(&contents)?;
     Ok(config)
 }
 
@@ -119,7 +120,14 @@ fn main() {
 
     let mut results = Vec::new();
 
-    for directory in config.directories {
+    // Collect all directories from all sections
+    let directories: Vec<String> = config.sections
+        .values()
+        .flat_map(|section| section.values())
+        .cloned()
+        .collect();
+
+    for directory in directories {
         let dir_path = PathBuf::from(&directory);
         let resolved_path = match dir_path.canonicalize() {
             Ok(p) => p,

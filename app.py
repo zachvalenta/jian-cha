@@ -1,5 +1,8 @@
 import getpass
-import json
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # Python 3.6-3.10
 from pathlib import Path
 import subprocess
 
@@ -43,7 +46,11 @@ def get_git_info(directory):
 
 def main():
     config = load_config()
-    directories = config.get("directories", [])
+    # Collect all directories from all sections
+    directories = []
+    for section_name, section_data in config.items():
+        if isinstance(section_data, dict):
+            directories.extend(section_data.values())
     results = []
     for directory in directories:
         dir_path = Path(directory).resolve()
@@ -102,9 +109,9 @@ def main():
 
 
 def load_config():
-    config_path = 'config-home.json' if getpass.getuser() == 'zach' else 'config-work.json'
-    with open(config_path, "r") as f:
-        return json.load(f)
+    config_path = 'config-home.toml' if getpass.getuser() == 'zach' else 'config-work.toml'
+    with open(config_path, "rb") as f:
+        return tomllib.load(f)
 
 
 if __name__ == "__main__":
