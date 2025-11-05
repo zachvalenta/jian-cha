@@ -22,6 +22,7 @@ struct GitInfo {
 #[derive(Debug)]
 struct RepoResult {
     directory: String,
+    section: String,
     branch: Option<String>,
     last_commit: Option<String>,
     clean: Option<bool>,
@@ -120,20 +121,24 @@ fn main() {
 
     let mut results = Vec::new();
 
-    // Collect all directories from all sections
-    let directories: Vec<String> = config.sections
-        .values()
-        .flat_map(|section| section.values())
-        .cloned()
+    // Collect all directories from all sections, tracking which section they belong to
+    let directories: Vec<(String, String)> = config.sections
+        .iter()
+        .flat_map(|(section_name, section)| {
+            section.values()
+                .map(|dir| (section_name.clone(), dir.clone()))
+                .collect::<Vec<_>>()
+        })
         .collect();
 
-    for directory in directories {
+    for (section_name, directory) in directories {
         let dir_path = PathBuf::from(&directory);
         let resolved_path = match dir_path.canonicalize() {
             Ok(p) => p,
             Err(_) => {
                 results.push(RepoResult {
                     directory: directory.clone(),
+                    section: section_name.clone(),
                     branch: None,
                     last_commit: None,
                     clean: None,
@@ -147,6 +152,7 @@ fn main() {
         if !is_git_repo(&resolved_path) {
             results.push(RepoResult {
                 directory: resolved_path.to_string_lossy().to_string(),
+                section: section_name.clone(),
                 branch: None,
                 last_commit: None,
                 clean: None,
@@ -160,6 +166,7 @@ fn main() {
             Some(git_info) => {
                 results.push(RepoResult {
                     directory: resolved_path.to_string_lossy().to_string(),
+                    section: section_name.clone(),
                     branch: Some(git_info.branch),
                     last_commit: Some(git_info.last_commit),
                     clean: Some(git_info.clean),
@@ -170,6 +177,7 @@ fn main() {
             None => {
                 results.push(RepoResult {
                     directory: resolved_path.to_string_lossy().to_string(),
+                    section: section_name.clone(),
                     branch: None,
                     last_commit: None,
                     clean: None,
@@ -180,51 +188,26 @@ fn main() {
         }
     }
 
-    // Group results by parent directory
+    // Group results by section name
     let mut grouped: HashMap<String, Vec<RepoResult>> = HashMap::new();
     for result in results {
-        let parent = PathBuf::from(&result.directory)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-        grouped.entry(parent).or_insert_with(Vec::new).push(result);
+        grouped.entry(result.section.clone()).or_insert_with(Vec::new).push(result);
     }
 
-    // Find common ancestors for nested paths and merge them
-    let mut final_grouped: HashMap<String, Vec<RepoResult>> = HashMap::new();
-    let parent_paths: Vec<String> = grouped.keys().cloned().collect();
+    // Sort sections for consistent output
+    let mut sections: Vec<_> = grouped.keys().cloned().collect();
+    sections.sort();
 
-    for (parent, repos) in grouped {
-        // Check if this parent is nested under another parent in our list
-        let mut common_ancestor = parent.clone();
-        for other_parent in &parent_paths {
-            if parent.starts_with(other_parent) && parent != *other_parent {
-                common_ancestor = other_parent.clone();
-                break;
-            }
-        }
+    // Create a table for each section
+    for section in sections {
+        let repos = grouped.get(&section).unwrap();
 
-        // Add to final grouped using the common ancestor
-        final_grouped.entry(common_ancestor).or_insert_with(Vec::new).extend(repos);
-    }
-
-    // Sort parent directories for consistent output
-    let mut parents: Vec<_> = final_grouped.keys().cloned().collect();
-    parents.sort();
-
-    // Create a table for each parent directory
-    for parent in parents {
-        let repos = final_grouped.get(&parent).unwrap();
-
-        // Extract just the parent directory name and make it uppercase
-        let parent_name = PathBuf::from(&parent)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_uppercase())
-            .unwrap_or_else(|| "UNKNOWN".to_string());
+        // Use the section name directly and make it uppercase
+        let section_name = section.to_uppercase();
 
         println!();
         // Print section header with bold, underline, and darkorange color
-        println!("\x1b[1;4;38;2;255;140;0m{}\x1b[0m", parent_name);
+        println!("\x1b[1;4;38;2;255;140;0m{}\x1b[0m", section_name);
 
         let mut table = Table::new();
         table
@@ -253,19 +236,12 @@ fn main() {
         table.column_mut(4).unwrap().set_padding((0, 1));
 
         for result in repos {
-            // Get relative path from parent directory
+            // Get repository name from directory path
             let repo_path = PathBuf::from(&result.directory);
-            let parent_path = PathBuf::from(&parent);
             let repo_name = repo_path
-                .strip_prefix(&parent_path)
-                .ok()
-                .and_then(|p| Some(p.to_string_lossy().to_string()))
-                .unwrap_or_else(|| {
-                    repo_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| result.directory.clone())
-                });
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| result.directory.clone());
 
             let (status_symbol, status_color) = if let Some(_error) = &result.error {
                 ("?", Color::Yellow)

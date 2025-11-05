@@ -15,6 +15,6 @@ domains = "/Users/zach/Documents/zv/notes/domains"
 
 [projects]
 # myblog = "/Users/zach/Documents/zv/projects/active/sites/myblog"
-baby-track = "/Users/zach/Documents/zv/projects/active/baby-track"
-jmore = "/Users/zach/Documents/zv/projects/active/mongo/jmore"
-wt-nosql = "/Users/zach/Documents/zv/projects/active/mongo/wt-nosql"
+# baby-track = "/Users/zach/Documents/zv/projects/active/personal/baby-track"
+# jmore = "/Users/zach/Documents/zv/projects/active/data/mongo/jmore"
+# wt-nosql = "/Users/zach/Documents/zv/projects/active/mongo/wt-nosql"
