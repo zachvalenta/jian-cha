@@ -224,7 +224,7 @@ fn main() {
         // Set fixed widths for each column
         table.column_mut(0).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(15)));  // Repository
         table.column_mut(1).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(18)));  // Branch
-        table.column_mut(2).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(6)));   // Status
+        table.column_mut(2).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8)));   // Status
         table.column_mut(3).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(35)));  // Last Commit
         table.column_mut(4).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8)));   // Error
 
