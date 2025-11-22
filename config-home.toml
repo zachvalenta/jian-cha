@@ -1,8 +1,8 @@
 [kero]
-worklogs = "/Users/zach/Documents/zv/work/kero/worklogs"
-tickets = "/Users/zach/Documents/zv/work/kero/tickets"
-docs = "/Users/zach/Documents/zv/work/kero/docs"
-rush = "/Users/zach/Documents/zv/work/kero/rush"
+worklogs = "/Users/zach/Documents/zv/work/kero/docs/worklogs"
+tickets = "/Users/zach/Documents/zv/work/kero/docs/tickets"
+docs = "/Users/zach/Documents/zv/work/kero/docs/eng"
+rush = "/Users/zach/Documents/zv/work/kero/src/automation/rush"
 
 [denv]
 # bin = "/Users/zach/Documents/denv/bin"
