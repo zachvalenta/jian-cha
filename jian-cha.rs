@@ -205,8 +205,10 @@ fn main() {
         let section_name = section.to_uppercase();
 
         println!();
-        // Print section header with bold, underline, and darkorange color
-        println!("\x1b[1;4;38;2;255;140;0m{}\x1b[0m", section_name);
+        // Print section header with banner style, bold, and darkorange color
+        println!("\x1b[1;38;2;255;140;0m═══════════════════════════\x1b[0m");
+        println!("\x1b[1;38;2;255;140;0m    {}\x1b[0m", section_name);
+        println!("\x1b[1;38;2;255;140;0m═══════════════════════════\x1b[0m");
 
         let mut table = Table::new();
         table
