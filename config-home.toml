@@ -1,7 +1,8 @@
 [kero]
-worklogs = "/Users/zach/Documents/zv/work/kero/docs/worklogs"
+agentic = "/Users/zach/Documents/zv/work/kero/docs/agentic"
+eng = "/Users/zach/Documents/zv/work/kero/docs/eng"
 tickets = "/Users/zach/Documents/zv/work/kero/docs/tickets"
-docs = "/Users/zach/Documents/zv/work/kero/docs/eng"
+worklogs = "/Users/zach/Documents/zv/work/kero/docs/worklogs"
 rush = "/Users/zach/Documents/zv/work/kero/src/automation/rush"
 
 [denv]
