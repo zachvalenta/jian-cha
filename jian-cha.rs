@@ -1,14 +1,14 @@
 use comfy_table::presets::ASCII_FULL;
 use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
     #[serde(flatten)]
-    sections: HashMap<String, HashMap<String, String>>,
+    sections: IndexMap<String, IndexMap<String, String>>,
 }
 
 #[derive(Debug)]
@@ -122,16 +122,17 @@ fn main() {
     let mut results = Vec::new();
 
     // Collect all directories from all sections, tracking which section they belong to
-    let directories: Vec<(String, String)> = config.sections
+    // IndexMap preserves insertion order from TOML
+    let directories: Vec<(String, String, String)> = config.sections
         .iter()
         .flat_map(|(section_name, section)| {
-            section.values()
-                .map(|dir| (section_name.clone(), dir.clone()))
+            section.iter()
+                .map(|(repo_name, dir)| (section_name.clone(), repo_name.clone(), dir.clone()))
                 .collect::<Vec<_>>()
         })
         .collect();
 
-    for (section_name, directory) in directories {
+    for (section_name, _repo_name, directory) in directories {
         let dir_path = PathBuf::from(&directory);
         let resolved_path = match dir_path.canonicalize() {
             Ok(p) => p,
@@ -189,18 +190,16 @@ fn main() {
     }
 
     // Group results by section name
-    let mut grouped: HashMap<String, Vec<RepoResult>> = HashMap::new();
+    let mut grouped: IndexMap<String, Vec<RepoResult>> = IndexMap::new();
     for result in results {
         grouped.entry(result.section.clone()).or_insert_with(Vec::new).push(result);
     }
 
-    // Sort sections for consistent output
-    let mut sections: Vec<_> = grouped.keys().cloned().collect();
-    sections.sort();
-
-    // Create a table for each section
-    for section in sections {
-        let repos = grouped.get(&section).unwrap();
+    // Create a table for each section, preserving order from config
+    for section in config.sections.keys() {
+        let Some(repos) = grouped.get(section) else {
+            continue;
+        };
 
         // Use the section name directly and make it uppercase
         let section_name = section.to_uppercase();
