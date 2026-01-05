@@ -90,14 +90,20 @@ fn get_git_info(directory: &Path) -> Option<GitInfo> {
 }
 
 fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let username = std::env::var("USER").unwrap_or_else(|_| String::from("unknown"));
-    let config_path = if username == "zach" {
-        "config-home.toml"
+    // Respect XDG Base Directory specification
+    let config_dir = if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg_config)
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config")
     } else {
-        "config-work.toml"
+        return Err("Could not determine config directory: HOME not set".into());
     };
 
-    let contents = std::fs::read_to_string(config_path)?;
+    let config_path = config_dir.join("jian-cha").join("config.toml");
+
+    let contents = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config at {}: {}", config_path.display(), e))?;
+
     let config: Config = toml::from_str(&contents)?;
     Ok(config)
 }
