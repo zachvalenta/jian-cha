@@ -24,14 +24,14 @@ help:
 
 build:
 	cargo build --release
-	cp target/release/jian-cha ./jian-cha
+	cp target/release/jiancha ./jiancha
 
 install:
 	cargo build --release
-	cp target/release/jian-cha /Users/zach/Documents/denv/bin/jian-cha
+	cp target/release/jiancha /Users/zach/Documents/denv/bin/jiancha
 
 run:
-	./jian-cha
+	./jiancha
 
 run-py:
 	python app.py

@@ -92,7 +92,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "jian-cha"
+name = "jiancha"
 version = "0.1.0"
 dependencies = [
  "comfy-table",

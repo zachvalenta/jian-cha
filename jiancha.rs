@@ -99,7 +99,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
         return Err("Could not determine config directory: HOME not set".into());
     };
 
-    let config_path = config_dir.join("jian-cha").join("config.toml");
+    let config_path = config_dir.join("jiancha").join("config.toml");
 
     let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read config at {}: {}", config_path.display(), e))?;
