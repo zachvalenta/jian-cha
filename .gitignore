@@ -1,5 +1,4 @@
 .claude
-.venv
 /target
 Cargo.lock
 jian-cha
