@@ -21,6 +21,7 @@ struct GitInfo {
 
 #[derive(Debug)]
 struct RepoResult {
+    repo_key: String,
     directory: String,
     section: String,
     branch: Option<String>,
@@ -138,12 +139,13 @@ fn main() {
         })
         .collect();
 
-    for (section_name, _repo_name, directory) in directories {
+    for (section_name, repo_name, directory) in directories {
         let dir_path = PathBuf::from(&directory);
         let resolved_path = match dir_path.canonicalize() {
             Ok(p) => p,
             Err(_) => {
                 results.push(RepoResult {
+                    repo_key: repo_name.clone(),
                     directory: directory.clone(),
                     section: section_name.clone(),
                     branch: None,
@@ -158,6 +160,7 @@ fn main() {
 
         if !is_git_repo(&resolved_path) {
             results.push(RepoResult {
+                repo_key: repo_name.clone(),
                 directory: resolved_path.to_string_lossy().to_string(),
                 section: section_name.clone(),
                 branch: None,
@@ -172,6 +175,7 @@ fn main() {
         match get_git_info(&resolved_path) {
             Some(git_info) => {
                 results.push(RepoResult {
+                    repo_key: repo_name.clone(),
                     directory: resolved_path.to_string_lossy().to_string(),
                     section: section_name.clone(),
                     branch: Some(git_info.branch),
@@ -183,6 +187,7 @@ fn main() {
             }
             None => {
                 results.push(RepoResult {
+                    repo_key: repo_name.clone(),
                     directory: resolved_path.to_string_lossy().to_string(),
                     section: section_name.clone(),
                     branch: None,
@@ -243,12 +248,8 @@ fn main() {
         table.column_mut(4).unwrap().set_padding((0, 1));
 
         for result in repos {
-            // Get repository name from directory path
-            let repo_path = PathBuf::from(&result.directory);
-            let repo_name = repo_path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| result.directory.clone());
+            // Use the repository key from TOML config
+            let repo_name = &result.repo_key;
 
             let (status_symbol, status_color) = if let Some(_error) = &result.error {
                 ("?", Color::Yellow)
