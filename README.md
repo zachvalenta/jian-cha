@@ -1,12 +1,42 @@
-# 🌐 OVERVIEW
+Keep track of git repos across machines.
 
-🗄️ git.md > tracker
+```sh
+# logging off for the day...
 
-* specify a list of repos I'm working with daily, especially those that exist on multiple machines and for which I want to avoid merge hell
-* run gfold before leaving for/from the office and see "do I need to commit anything?"
+# "oh wait, do I need to push anything?"
 
-# ☑️  TODO
+$ jc
 
-- [x] Python impl
-- [x] Rust impl
-- [ ] check remote
+═══════════════════════════
+    PROJECTS
+═══════════════════════════
++------------+------------------+--------+-----------------------------------+----------+--------+
+|Repository  |Branch            |Status  |Last Commit                        |Remote    |Error   |
++================================================================================================+
+|foo         |main              |✓       |tidy: cursor on 'now' col on T...  |✓         |-       |
+|------------+------------------+--------+-----------------------------------+----------+--------|
+|bar         |main              |✗       |rdd: schedule                      |✓         |-       |
+|------------+------------------+--------+-----------------------------------+----------+--------|
+|baz         |main              |✓       |carl                               |✓         |-       |
++------------+------------------+--------+-----------------------------------+----------+--------+
+
+# logging in the next morning...
+
+# "Did I commit anything last night?"
+
+$ jc
+
+═══════════════════════════
+    PROJECTS
+═══════════════════════════
++------------+------------------+--------+-----------------------------------+----------+--------+
+|Repository  |Branch            |Status  |Last Commit                        |Remote    |Error   |
++================================================================================================+
+|foo         |main              |✓       |tidy: cursor on 'now' col on T...  |✓         |-       |
+|------------+------------------+--------+-----------------------------------+----------+--------|
+|bar         |main              |✗       |rdd: schedule                      |✓         |-       |
+|------------+------------------+--------+-----------------------------------+----------+--------|
+|baz         |main              |✓       |carl                               |✓         |-       |
++------------+------------------+--------+-----------------------------------+----------+--------+
+```
+
