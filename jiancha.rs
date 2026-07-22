@@ -110,6 +110,34 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     Ok(toml::from_str(&contents)?)
 }
 
+fn terminal_width() -> Option<u16> {
+    Command::new("sh")
+        .args(["-c", "stty size < /dev/tty"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.split_whitespace().nth(1).and_then(|w| w.parse::<u16>().ok()))
+        .filter(|&w| w > 0)
+        .or_else(|| {
+            std::env::var("COLUMNS")
+                .ok()
+                .and_then(|s| s.parse::<u16>().ok())
+                .filter(|&w| w > 0)
+        })
+        .or_else(|| Table::new().width())
+}
+
+const DEFAULT_TABLE_WIDTH: u16 = 101;
+const DEFAULT_SECTION_RULE_WIDTH: u16 = 27;
+
+fn section_rule(width: Option<u16>) -> String {
+    let len = width
+        .map(|w| w.min(DEFAULT_SECTION_RULE_WIDTH))
+        .unwrap_or(DEFAULT_SECTION_RULE_WIDTH) as usize;
+    "═".repeat(len)
+}
+
 fn truncate_string(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
@@ -120,34 +148,81 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 
 fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> String {
     let mut output = String::new();
+    let viewport_width = terminal_width().map(|w| w.saturating_sub(2));
+    let full_size = viewport_width.map_or(true, |w| w >= DEFAULT_TABLE_WIDTH);
+    let compact = viewport_width.is_some_and(|w| w < 80);
+    let narrow = viewport_width.is_some_and(|w| w < 60);
+    let tiny = viewport_width.is_some_and(|w| w < 40);
+    let ultra_tiny = viewport_width.is_some_and(|w| w < 28);
+    let show_branch = full_size || !tiny;
+    let show_last_commit = full_size || !narrow;
+    let show_remote = full_size || !ultra_tiny;
+    let show_error = full_size || !compact;
+    let rule = section_rule(viewport_width);
 
     for section_name in sections.keys() {
         let repo_indices = &sections[section_name];
 
         output.push('\n');
-        output.push_str("\x1b[1;38;2;255;140;0m═══════════════════════════\x1b[0m\n");
+        output.push_str(&format!("\x1b[1;38;2;255;140;0m{}\x1b[0m\n", rule));
         output.push_str(&format!("\x1b[1;38;2;255;140;0m    {}\x1b[0m\n", section_name.to_uppercase()));
-        output.push_str("\x1b[1;38;2;255;140;0m═══════════════════════════\x1b[0m\n");
+        output.push_str(&format!("\x1b[1;38;2;255;140;0m{}\x1b[0m\n", rule));
 
         let mut table = Table::new();
-        table
-            .load_preset(ASCII_FULL)
-            .set_content_arrangement(ContentArrangement::Disabled)
-            .set_header(vec![
-                Cell::new("Repository").fg(Color::Cyan),
-                Cell::new("Branch").fg(Color::Magenta),
-                Cell::new("Status").fg(Color::Rgb { r: 119, g: 136, b: 153 }),
-                Cell::new("Last Commit").fg(Color::Rgb { r: 184, g: 134, b: 11 }),
-                Cell::new("Remote").fg(Color::Rgb { r: 100, g: 200, b: 100 }),
-                Cell::new("Error").fg(Color::Red),
-            ]);
+        table.load_preset(ASCII_FULL);
+        if full_size {
+            table.set_content_arrangement(ContentArrangement::Disabled);
+        } else if let Some(width) = viewport_width {
+            table
+                .set_content_arrangement(ContentArrangement::Dynamic)
+                .set_width(width);
+        }
 
-        table.column_mut(0).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(15))).set_padding((0, 1));
-        table.column_mut(1).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(18))).set_padding((0, 1));
-        table.column_mut(2).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8))).set_padding((0, 1));
-        table.column_mut(3).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(35))).set_padding((0, 1));
-        table.column_mut(4).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(10))).set_padding((0, 1));
-        table.column_mut(5).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8))).set_padding((0, 1));
+        let mut header = vec![Cell::new(if full_size { "Repository" } else { "Repo" }).fg(Color::Cyan)];
+        if show_branch {
+            header.push(Cell::new(if full_size { "Branch" } else { "Br" }).fg(Color::Magenta));
+        }
+        header.push(Cell::new(if full_size { "Status" } else { "St" }).fg(Color::Rgb { r: 119, g: 136, b: 153 }));
+        if show_last_commit {
+            header.push(Cell::new(if full_size { "Last Commit" } else { "Last" }).fg(Color::Rgb { r: 184, g: 134, b: 11 }));
+        }
+        if show_remote {
+            header.push(Cell::new(if full_size { "Remote" } else { "R" }).fg(Color::Rgb { r: 100, g: 200, b: 100 }));
+        }
+        if show_error {
+            header.push(Cell::new(if full_size { "Error" } else { "Err" }).fg(Color::Red));
+        }
+        table.set_header(header);
+
+        if full_size {
+            table.column_mut(0).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(15))).set_padding((0, 1));
+            table.column_mut(1).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(18))).set_padding((0, 1));
+            table.column_mut(2).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8))).set_padding((0, 1));
+            table.column_mut(3).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(35))).set_padding((0, 1));
+            table.column_mut(4).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(10))).set_padding((0, 1));
+            table.column_mut(5).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8))).set_padding((0, 1));
+        } else {
+            let mut col = 0;
+            table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(if tiny { 60 } else { 25 }))).set_padding((0, 1));
+            col += 1;
+            if show_branch {
+                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(25))).set_padding((0, 1));
+                col += 1;
+            }
+            table.column_mut(col).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(4))).set_padding((0, 1));
+            col += 1;
+            if show_last_commit {
+                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(30))).set_padding((0, 1));
+                col += 1;
+            }
+            if show_remote {
+                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(4))).set_padding((0, 1));
+                col += 1;
+            }
+            if show_error {
+                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(14))).set_padding((0, 1));
+            }
+        }
 
         for &idx in repo_indices {
             let repo = &repos[idx];
@@ -174,14 +249,32 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
             let last_commit = repo.last_commit.as_deref().unwrap_or("");
             let error      = repo.local_error.as_deref().unwrap_or("-");
 
-            table.add_row(vec![
-                Cell::new(truncate_string(&repo.repo_key, 13)),
-                Cell::new(truncate_string(branch, 16)),
-                Cell::new(status_symbol).fg(status_color).add_attribute(Attribute::Bold),
-                Cell::new(truncate_string(last_commit, 33)),
-                Cell::new(remote_text).fg(remote_color),
-                Cell::new(truncate_string(error, 6)),
-            ]);
+            if full_size {
+                table.add_row(vec![
+                    Cell::new(truncate_string(&repo.repo_key, 13)),
+                    Cell::new(truncate_string(branch, 16)),
+                    Cell::new(status_symbol).fg(status_color).add_attribute(Attribute::Bold),
+                    Cell::new(truncate_string(last_commit, 33)),
+                    Cell::new(remote_text).fg(remote_color),
+                    Cell::new(truncate_string(error, 6)),
+                ]);
+            } else {
+                let mut row = vec![Cell::new(truncate_string(&repo.repo_key, 40))];
+                if show_branch {
+                    row.push(Cell::new(truncate_string(branch, 40)));
+                }
+                row.push(Cell::new(status_symbol).fg(status_color).add_attribute(Attribute::Bold));
+                if show_last_commit {
+                    row.push(Cell::new(truncate_string(last_commit, 80)));
+                }
+                if show_remote {
+                    row.push(Cell::new(remote_text).fg(remote_color));
+                }
+                if show_error {
+                    row.push(Cell::new(truncate_string(error, 40)));
+                }
+                table.add_row(row);
+            }
         }
 
         output.push_str(&table.to_string());
