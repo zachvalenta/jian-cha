@@ -2,9 +2,11 @@ use comfy_table::presets::ASCII_FULL;
 use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
@@ -12,13 +14,39 @@ struct Config {
     sections: IndexMap<String, IndexMap<String, String>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum FetchStatus {
     Pending,
     UpToDate,
     Behind(u32),
     Error,
 }
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Cache {
+    last_run_at: Option<u64>,
+    repos: HashMap<String, CacheEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CacheEntry {
+    repo_key: String,
+    branch: String,
+    upstream: Option<String>,
+    fetched_at: u64,
+    fetch_status: FetchStatus,
+}
+
+#[derive(Debug)]
+struct Args {
+    fresh: bool,
+    offline: bool,
+}
+
+const REMOTE_TTL_SECS: u64 = 30 * 60;
+const ERROR_RETRY_TTL_SECS: u64 = 2 * 60;
+const SESSION_GAP_REFRESH_SECS: u64 = 90 * 60;
 
 #[derive(Debug)]
 struct RepoRow {
@@ -28,6 +56,7 @@ struct RepoRow {
     last_commit: Option<String>,
     clean: Option<bool>,
     has_unpushed: Option<bool>,
+    upstream: Option<String>,
     local_error: Option<String>,
     fetch_status: FetchStatus,
 }
@@ -60,6 +89,7 @@ struct LocalInfo {
     last_commit: String,
     clean: bool,
     has_unpushed: Option<bool>,
+    upstream: Option<String>,
 }
 
 fn get_local_info(dir: &str) -> Option<LocalInfo> {
@@ -70,7 +100,17 @@ fn get_local_info(dir: &str) -> Option<LocalInfo> {
     let has_unpushed = git_cmd(dir, &["rev-list", "--count", "@{u}..HEAD"])
         .and_then(|s| s.parse::<u32>().ok())
         .map(|n| n > 0);
-    Some(LocalInfo { branch, last_commit, clean, has_unpushed })
+    let upstream = git_cmd(
+        dir,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    );
+    Some(LocalInfo {
+        branch,
+        last_commit,
+        clean,
+        has_unpushed,
+        upstream,
+    })
 }
 
 fn run_git_fetch(dir: &str) -> FetchStatus {
@@ -110,6 +150,81 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     Ok(toml::from_str(&contents)?)
 }
 
+fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
+    let mut args = Args {
+        fresh: false,
+        offline: false,
+    };
+
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--fresh" | "--refresh" => args.fresh = true,
+            "--offline" => args.offline = true,
+            "-h" | "--help" => {
+                println!("Usage: jiancha [--fresh|--refresh] [--offline]");
+                std::process::exit(0);
+            }
+            _ => return Err(format!("Unknown argument: {arg}").into()),
+        }
+    }
+
+    if args.fresh && args.offline {
+        return Err("--fresh and --offline cannot be used together".into());
+    }
+
+    Ok(args)
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn cache_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let cache_dir = if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        PathBuf::from(xdg)
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".cache")
+    } else {
+        return Err("HOME not set".into());
+    };
+    Ok(cache_dir.join("jiancha").join("cache.toml"))
+}
+
+fn load_cache(path: &Path) -> Cache {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| toml::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
+fn save_cache(path: &Path, cache: &Cache) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let tmp_path = path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, toml::to_string_pretty(cache)?)?;
+    std::fs::rename(tmp_path, path)?;
+    Ok(())
+}
+
+fn cached_fetch_status(entry: &CacheEntry, repo: &RepoRow, now: u64) -> Option<FetchStatus> {
+    if entry.branch != repo.branch.as_deref().unwrap_or("") || entry.upstream != repo.upstream {
+        return None;
+    }
+
+    let age = now.saturating_sub(entry.fetched_at);
+    let ttl = match entry.fetch_status {
+        FetchStatus::Error => ERROR_RETRY_TTL_SECS,
+        _ => REMOTE_TTL_SECS,
+    };
+
+    (age <= ttl).then(|| entry.fetch_status.clone())
+}
+
 fn terminal_width() -> Option<u16> {
     Command::new("sh")
         .args(["-c", "stty size < /dev/tty"])
@@ -117,7 +232,11 @@ fn terminal_width() -> Option<u16> {
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.split_whitespace().nth(1).and_then(|w| w.parse::<u16>().ok()))
+        .and_then(|s| {
+            s.split_whitespace()
+                .nth(1)
+                .and_then(|w| w.parse::<u16>().ok())
+        })
         .filter(|&w| w > 0)
         .or_else(|| {
             std::env::var("COLUMNS")
@@ -165,7 +284,10 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
 
         output.push('\n');
         output.push_str(&format!("\x1b[1;38;2;255;140;0m{}\x1b[0m\n", rule));
-        output.push_str(&format!("\x1b[1;38;2;255;140;0m    {}\x1b[0m\n", section_name.to_uppercase()));
+        output.push_str(&format!(
+            "\x1b[1;38;2;255;140;0m    {}\x1b[0m\n",
+            section_name.to_uppercase()
+        ));
         output.push_str(&format!("\x1b[1;38;2;255;140;0m{}\x1b[0m\n", rule));
 
         let mut table = Table::new();
@@ -178,16 +300,35 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
                 .set_width(width);
         }
 
-        let mut header = vec![Cell::new(if full_size { "Repository" } else { "Repo" }).fg(Color::Cyan)];
+        let mut header =
+            vec![Cell::new(if full_size { "Repository" } else { "Repo" }).fg(Color::Cyan)];
         if show_branch {
             header.push(Cell::new(if full_size { "Branch" } else { "Br" }).fg(Color::Magenta));
         }
-        header.push(Cell::new(if full_size { "Status" } else { "St" }).fg(Color::Rgb { r: 119, g: 136, b: 153 }));
+        header.push(
+            Cell::new(if full_size { "Status" } else { "St" }).fg(Color::Rgb {
+                r: 119,
+                g: 136,
+                b: 153,
+            }),
+        );
         if show_last_commit {
-            header.push(Cell::new(if full_size { "Last Commit" } else { "Last" }).fg(Color::Rgb { r: 184, g: 134, b: 11 }));
+            header.push(
+                Cell::new(if full_size { "Last Commit" } else { "Last" }).fg(Color::Rgb {
+                    r: 184,
+                    g: 134,
+                    b: 11,
+                }),
+            );
         }
         if show_remote {
-            header.push(Cell::new(if full_size { "Remote" } else { "R" }).fg(Color::Rgb { r: 100, g: 200, b: 100 }));
+            header.push(
+                Cell::new(if full_size { "Remote" } else { "R" }).fg(Color::Rgb {
+                    r: 100,
+                    g: 200,
+                    b: 100,
+                }),
+            );
         }
         if show_error {
             header.push(Cell::new(if full_size { "Error" } else { "Err" }).fg(Color::Red));
@@ -195,32 +336,82 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
         table.set_header(header);
 
         if full_size {
-            table.column_mut(0).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(15))).set_padding((0, 1));
-            table.column_mut(1).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(18))).set_padding((0, 1));
-            table.column_mut(2).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8))).set_padding((0, 1));
-            table.column_mut(3).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(35))).set_padding((0, 1));
-            table.column_mut(4).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(10))).set_padding((0, 1));
-            table.column_mut(5).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(8))).set_padding((0, 1));
+            table
+                .column_mut(0)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(15)))
+                .set_padding((0, 1));
+            table
+                .column_mut(1)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(18)))
+                .set_padding((0, 1));
+            table
+                .column_mut(2)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(8)))
+                .set_padding((0, 1));
+            table
+                .column_mut(3)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(35)))
+                .set_padding((0, 1));
+            table
+                .column_mut(4)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(10)))
+                .set_padding((0, 1));
+            table
+                .column_mut(5)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(8)))
+                .set_padding((0, 1));
         } else {
             let mut col = 0;
-            table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(if tiny { 60 } else { 25 }))).set_padding((0, 1));
+            table
+                .column_mut(col)
+                .unwrap()
+                .set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(
+                    if tiny { 60 } else { 25 },
+                )))
+                .set_padding((0, 1));
             col += 1;
             if show_branch {
-                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(25))).set_padding((0, 1));
+                table
+                    .column_mut(col)
+                    .unwrap()
+                    .set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(25)))
+                    .set_padding((0, 1));
                 col += 1;
             }
-            table.column_mut(col).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(4))).set_padding((0, 1));
+            table
+                .column_mut(col)
+                .unwrap()
+                .set_constraint(ColumnConstraint::Absolute(Width::Fixed(4)))
+                .set_padding((0, 1));
             col += 1;
             if show_last_commit {
-                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(30))).set_padding((0, 1));
+                table
+                    .column_mut(col)
+                    .unwrap()
+                    .set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(30)))
+                    .set_padding((0, 1));
                 col += 1;
             }
             if show_remote {
-                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::Absolute(Width::Fixed(4))).set_padding((0, 1));
+                table
+                    .column_mut(col)
+                    .unwrap()
+                    .set_constraint(ColumnConstraint::Absolute(Width::Fixed(4)))
+                    .set_padding((0, 1));
                 col += 1;
             }
             if show_error {
-                table.column_mut(col).unwrap().set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(14))).set_padding((0, 1));
+                table
+                    .column_mut(col)
+                    .unwrap()
+                    .set_constraint(ColumnConstraint::UpperBoundary(Width::Percentage(14)))
+                    .set_padding((0, 1));
             }
         }
 
@@ -239,21 +430,23 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
             };
 
             let (remote_text, remote_color) = match &repo.fetch_status {
-                FetchStatus::Pending  => ("...".to_string(),    Color::Grey),
-                FetchStatus::UpToDate => ("✓".to_string(),      Color::Green),
+                FetchStatus::Pending => ("...".to_string(), Color::Grey),
+                FetchStatus::UpToDate => ("✓".to_string(), Color::Green),
                 FetchStatus::Behind(n) => (format!("↓ {}", n), Color::Yellow),
-                FetchStatus::Error    => ("err".to_string(),    Color::Red),
+                FetchStatus::Error => ("err".to_string(), Color::Red),
             };
 
-            let branch     = repo.branch.as_deref().unwrap_or("");
+            let branch = repo.branch.as_deref().unwrap_or("");
             let last_commit = repo.last_commit.as_deref().unwrap_or("");
-            let error      = repo.local_error.as_deref().unwrap_or("-");
+            let error = repo.local_error.as_deref().unwrap_or("-");
 
             if full_size {
                 table.add_row(vec![
                     Cell::new(truncate_string(&repo.repo_key, 13)),
                     Cell::new(truncate_string(branch, 16)),
-                    Cell::new(status_symbol).fg(status_color).add_attribute(Attribute::Bold),
+                    Cell::new(status_symbol)
+                        .fg(status_color)
+                        .add_attribute(Attribute::Bold),
                     Cell::new(truncate_string(last_commit, 33)),
                     Cell::new(remote_text).fg(remote_color),
                     Cell::new(truncate_string(error, 6)),
@@ -263,7 +456,11 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
                 if show_branch {
                     row.push(Cell::new(truncate_string(branch, 40)));
                 }
-                row.push(Cell::new(status_symbol).fg(status_color).add_attribute(Attribute::Bold));
+                row.push(
+                    Cell::new(status_symbol)
+                        .fg(status_color)
+                        .add_attribute(Attribute::Bold),
+                );
                 if show_last_commit {
                     row.push(Cell::new(truncate_string(last_commit, 80)));
                 }
@@ -286,7 +483,15 @@ fn render_all(repos: &[RepoRow], sections: &IndexMap<String, Vec<usize>>) -> Str
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args = parse_args()?;
     let config = load_config()?;
+    let now = now_secs();
+    let cache_path = cache_path()?;
+    let mut cache = load_cache(&cache_path);
+    let previous_run_at = cache.last_run_at;
+    let force_session_refresh = previous_run_at
+        .map(|last_run_at| now.saturating_sub(last_run_at) > SESSION_GAP_REFRESH_SECS)
+        .unwrap_or(true);
 
     let mut repos: Vec<RepoRow> = Vec::new();
     let mut sections: IndexMap<String, Vec<usize>> = IndexMap::new();
@@ -303,7 +508,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     repos.push(RepoRow {
                         repo_key: repo_name.clone(),
                         directory: dir_str.clone(),
-                        branch: None, last_commit: None, clean: None, has_unpushed: None,
+                        branch: None,
+                        last_commit: None,
+                        clean: None,
+                        has_unpushed: None,
+                        upstream: None,
                         local_error: Some("Not a valid directory".into()),
                         fetch_status: FetchStatus::Pending,
                     });
@@ -315,7 +524,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 repos.push(RepoRow {
                     repo_key: repo_name.clone(),
                     directory: resolved.to_string_lossy().into_owned(),
-                    branch: None, last_commit: None, clean: None, has_unpushed: None,
+                    branch: None,
+                    last_commit: None,
+                    clean: None,
+                    has_unpushed: None,
+                    upstream: None,
                     local_error: Some("Not a Git repository".into()),
                     fetch_status: FetchStatus::Pending,
                 });
@@ -323,39 +536,94 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let dir_s = resolved.to_string_lossy().into_owned();
-            let (branch, last_commit, clean, has_unpushed, local_error) =
+            let (branch, last_commit, clean, has_unpushed, upstream, local_error) =
                 match get_local_info(&dir_s) {
-                    Some(info) => (Some(info.branch), Some(info.last_commit), Some(info.clean), info.has_unpushed, None),
-                    None => (None, None, None, None, Some("Failed to get git info".into())),
+                    Some(info) => (
+                        Some(info.branch),
+                        Some(info.last_commit),
+                        Some(info.clean),
+                        info.has_unpushed,
+                        info.upstream,
+                        None,
+                    ),
+                    None => (
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some("Failed to get git info".into()),
+                    ),
                 };
 
             repos.push(RepoRow {
                 repo_key: repo_name.clone(),
                 directory: dir_s,
-                branch, last_commit, clean, has_unpushed, local_error,
+                branch,
+                last_commit,
+                clean,
+                has_unpushed,
+                upstream,
+                local_error,
                 fetch_status: FetchStatus::Pending,
             });
         }
     }
 
-    // Fetch all remotes in parallel, then join before rendering
-    let handles: Vec<(String, thread::JoinHandle<FetchStatus>)> = repos
-        .iter()
-        .filter(|r| r.local_error.is_none())
-        .map(|repo| {
-            let dir = repo.directory.clone();
-            let key = repo.repo_key.clone();
+    let mut fetch_indices = Vec::new();
+    for (idx, repo) in repos.iter_mut().enumerate() {
+        if repo.local_error.is_some() {
+            continue;
+        }
+
+        let cached_status = cache
+            .repos
+            .get(&repo.directory)
+            .and_then(|entry| cached_fetch_status(entry, repo, now));
+
+        if !args.fresh && !force_session_refresh {
+            if let Some(status) = cached_status {
+                repo.fetch_status = status;
+                continue;
+            }
+        }
+
+        if args.offline {
+            if let Some(status) = cached_status {
+                repo.fetch_status = status;
+            }
+            continue;
+        }
+
+        fetch_indices.push(idx);
+    }
+
+    let handles: Vec<(usize, thread::JoinHandle<FetchStatus>)> = fetch_indices
+        .into_iter()
+        .map(|idx| {
+            let dir = repos[idx].directory.clone();
             let handle = thread::spawn(move || run_git_fetch(&dir));
-            (key, handle)
+            (idx, handle)
         })
         .collect();
 
-    for (key, handle) in handles {
+    for (idx, handle) in handles {
         let status = handle.join().unwrap_or(FetchStatus::Error);
-        if let Some(idx) = repos.iter().position(|r| r.repo_key == key) {
-            repos[idx].fetch_status = status;
-        }
+        repos[idx].fetch_status = status.clone();
+        cache.repos.insert(
+            repos[idx].directory.clone(),
+            CacheEntry {
+                repo_key: repos[idx].repo_key.clone(),
+                branch: repos[idx].branch.clone().unwrap_or_default(),
+                upstream: repos[idx].upstream.clone(),
+                fetched_at: now,
+                fetch_status: status,
+            },
+        );
     }
+
+    cache.last_run_at = Some(now);
+    save_cache(&cache_path, &cache)?;
 
     print!("{}", render_all(&repos, &sections));
     Ok(())
