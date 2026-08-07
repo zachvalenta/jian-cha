@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
@@ -863,8 +864,9 @@ fn run_sync(repos: &[RepoRow], sync: &SyncArgs) {
     println!("done: {ok} ok, {skipped_or_failed} skipped/failed");
 }
 
-fn repo_counts(repos: &[RepoRow]) -> (usize, usize, usize, usize) {
+fn repo_counts(repos: &[RepoRow]) -> (usize, usize, usize, usize, usize) {
     (
+        repos.iter().filter(|r| r.clean == Some(true)).count(),
         repos.iter().filter(|r| r.clean == Some(false)).count(),
         repos
             .iter()
@@ -876,6 +878,18 @@ fn repo_counts(repos: &[RepoRow]) -> (usize, usize, usize, usize) {
             .count(),
         repos.iter().filter(|r| r.local_error.is_some()).count(),
     )
+}
+
+fn to_ratatui_color(color: Color) -> ratatui::style::Color {
+    match color {
+        Color::Green => ratatui::style::Color::Green,
+        Color::Red => ratatui::style::Color::Red,
+        Color::Yellow => ratatui::style::Color::Yellow,
+        Color::Grey => ratatui::style::Color::Gray,
+        Color::Cyan => ratatui::style::Color::Cyan,
+        Color::Magenta => ratatui::style::Color::Magenta,
+        _ => ratatui::style::Color::White,
+    }
 }
 
 struct App {
@@ -932,16 +946,20 @@ impl App {
     }
 }
 
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
 fn repo_card_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let card_width = width.saturating_sub(4).max(32) as usize;
-    let inner_width = card_width.saturating_sub(4);
+    let inner_width = card_width.saturating_sub(2);
     let mut lines = Vec::new();
     let mut idx = 0;
 
     while idx < app.repos.len() {
         let group = app.repos[idx].group.clone();
         let title = format!(" {} ", group.to_uppercase());
-        let rule_len = card_width.saturating_sub(title.len() + 2);
+        let rule_len = inner_width.saturating_sub(display_width(&title) + 1);
         lines.push(Line::from(vec![
             Span::styled("╭", Style::default().fg(ratatui::style::Color::DarkGray)),
             Span::styled(
@@ -967,20 +985,40 @@ fn repo_card_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 .as_deref()
                 .or(repo.last_commit.as_deref())
                 .unwrap_or("");
-            let body = format!(
-                " {} {:>4}  {:<14} {:<13} {}",
-                status_symbol(repo),
-                remote_text(repo),
+            let status = format!(" {} ", status_symbol(repo));
+            let remote = format!("{:>4} ", remote_text(repo));
+            let fixed_width = 1 + 14 + 1 + 13 + 1;
+            let note_width = inner_width
+                .saturating_sub(display_width(&status) + display_width(&remote) + fixed_width);
+            let rest = format!(
+                " {:<14} {:<13} {}",
                 truncate_string(&repo.repo_key, 14),
                 truncate_string(branch, 13),
-                truncate_string(note, inner_width.saturating_sub(39))
+                truncate_string(note, note_width)
             );
+            let used = display_width(&status) + display_width(&remote) + display_width(&rest);
+            let pad = " ".repeat(inner_width.saturating_sub(used));
+            let icon_modifier = if selected {
+                Modifier::REVERSED
+            } else {
+                Modifier::empty()
+            };
             lines.push(Line::from(vec![
                 Span::styled("│", Style::default().fg(ratatui::style::Color::DarkGray)),
                 Span::styled(
-                    format!("{:<inner_width$}", truncate_string(&body, inner_width)),
-                    row_style,
+                    status,
+                    Style::default()
+                        .fg(to_ratatui_color(status_color(repo)))
+                        .add_modifier(icon_modifier),
                 ),
+                Span::styled(
+                    remote,
+                    Style::default()
+                        .fg(to_ratatui_color(remote_color(repo)))
+                        .add_modifier(icon_modifier),
+                ),
+                Span::styled(rest, row_style),
+                Span::styled(pad, row_style),
                 Span::styled("│", Style::default().fg(ratatui::style::Color::DarkGray)),
             ]));
             idx += 1;
@@ -989,7 +1027,7 @@ fn repo_card_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled("╰", Style::default().fg(ratatui::style::Color::DarkGray)),
             Span::styled(
-                "─".repeat(card_width.saturating_sub(2)),
+                "─".repeat(inner_width),
                 Style::default().fg(ratatui::style::Color::DarkGray),
             ),
             Span::styled("╯", Style::default().fg(ratatui::style::Color::DarkGray)),
@@ -1014,15 +1052,30 @@ fn draw_tui(f: &mut ratatui::Frame, app: &mut App) {
         .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(root[1]);
 
-    let (dirty, ahead, behind, errors) = repo_counts(&app.repos);
-    let header = Paragraph::new(format!(
-        "jiancha  repos {}  dirty {}  ahead {}  behind {}  errors {}",
-        app.repos.len(),
-        dirty,
-        ahead,
-        behind,
-        errors
-    ))
+    let (clean, dirty, ahead, behind, errors) = repo_counts(&app.repos);
+    let header = Paragraph::new(Line::from(vec![
+        Span::raw(format!("repos: {}  ", app.repos.len())),
+        Span::styled(
+            format!("clean: {clean}  "),
+            Style::default().fg(ratatui::style::Color::Green),
+        ),
+        Span::styled(
+            format!("dirty: {dirty}  "),
+            Style::default().fg(ratatui::style::Color::Red),
+        ),
+        Span::styled(
+            format!("ahead: {ahead}  "),
+            Style::default().fg(ratatui::style::Color::Yellow),
+        ),
+        Span::styled(
+            format!("behind: {behind}  "),
+            Style::default().fg(ratatui::style::Color::Yellow),
+        ),
+        Span::styled(
+            format!("errors: {errors}"),
+            Style::default().fg(ratatui::style::Color::Yellow),
+        ),
+    ]))
     .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, root[0]);
 
