@@ -894,8 +894,16 @@ fn sync_repo(repo: &RepoRow, reset: bool, yes: bool) -> (bool, String) {
         if repo.clean != Some(true) {
             return (false, format!("skip {}: dirty working tree", repo.repo_key));
         }
+        let head_before = git_cmd(&repo.directory, &["rev-parse", "HEAD"]);
         match git_status(&repo.directory, &["pull", "--ff-only"]) {
-            Ok(_) => (true, format!("sync {}", repo.repo_key)),
+            Ok(_) => {
+                let action = if head_before != git_cmd(&repo.directory, &["rev-parse", "HEAD"]) {
+                    "pulled"
+                } else {
+                    "up to date"
+                };
+                (true, format!("sync {}: {}", repo.repo_key, action))
+            }
             Err(e) => (false, format!("fail {}: pull: {}", repo.repo_key, e)),
         }
     }
@@ -958,17 +966,33 @@ fn run_auto_sync(repos: &[RepoRow]) {
     println!("done: {ok} ok, {skipped_or_failed} skipped/failed");
 }
 
+fn sync_progress(done: usize, total: usize) -> String {
+    const WIDTH: usize = 20;
+    let filled = if total == 0 { 0 } else { done * WIDTH / total };
+    format!("{}{}", "#".repeat(filled), "-".repeat(WIDTH - filled))
+}
+
 fn run_sync(repos: &[RepoRow], sync: &SyncArgs) {
+    let selected: Vec<&RepoRow> = repos
+        .iter()
+        .filter(|repo| selected_for_sync(repo, sync))
+        .collect();
+    let total = selected.len();
     let mut ok = 0;
     let mut skipped_or_failed = 0;
-    for repo in repos.iter().filter(|r| selected_for_sync(r, sync)) {
+    for (index, repo) in selected.into_iter().enumerate() {
         let (success, msg) = sync_repo(repo, sync.reset, true);
         if success {
             ok += 1;
         } else {
             skipped_or_failed += 1;
         }
-        println!("{msg}");
+        println!(
+            "[{}] {}/{} {msg}",
+            sync_progress(index + 1, total),
+            index + 1,
+            total
+        );
     }
     println!("done: {ok} ok, {skipped_or_failed} skipped/failed");
 }
@@ -1381,7 +1405,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         CommandMode::Tui => run_tui(&config, &args, &cache_path)?,
-        CommandMode::Sync(sync) => run_sync(&repos, sync),
+        CommandMode::Sync(sync) => {
+            run_sync(&repos, sync);
+            // `sync` fetches and may advance HEAD, so cached remote counts no
+            // longer describe the working tree. The next normal check refreshes.
+            let _ = std::fs::remove_file(&cache_path);
+        }
         CommandMode::AutoSync => run_auto_sync(&repos),
     }
     Ok(())
@@ -1390,5 +1419,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn main() {
     if let Err(e) = run() {
         eprintln!("Error: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_progress_fills_proportionally() {
+        assert_eq!(sync_progress(0, 4), "--------------------");
+        assert_eq!(sync_progress(2, 4), "##########----------");
+        assert_eq!(sync_progress(4, 4), "####################");
     }
 }

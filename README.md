@@ -97,14 +97,14 @@ x         reset selected repo, gated by allow_reset=true
 q/Esc     quit
 ```
 
-Safe sync runs on the currently checked-out branch of every selected clean repo; it does not require `working_branch` configuration:
+Safe sync runs:
 
 ```sh
 git fetch --all --prune
 git pull --ff-only
 ```
 
-Reset sync requires `working_branch`; it verifies that branch is checked out before resetting:
+Reset sync runs:
 
 ```sh
 git fetch --all --prune
