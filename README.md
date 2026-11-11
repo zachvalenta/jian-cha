@@ -84,6 +84,8 @@ jiancha sync --reset       # hard-reset all configured repos to their remotes
 jiancha sync --group rdd   # fast-forward pull one group
 ```
 
+Sync operations run up to 8 repositories concurrently.
+
 TUI keys:
 
 ```text

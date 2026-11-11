@@ -114,6 +114,7 @@ struct SyncArgs {
 const REMOTE_TTL_SECS: u64 = 30 * 60;
 const ERROR_RETRY_TTL_SECS: u64 = 2 * 60;
 const SESSION_GAP_REFRESH_SECS: u64 = 90 * 60;
+const SYNC_CONCURRENCY: usize = 8;
 
 #[derive(Debug, Clone)]
 struct RepoRow {
@@ -951,11 +952,35 @@ fn auto_sync_repo(repo: &RepoRow) -> (bool, String) {
     }
 }
 
+fn run_parallel_sync<F>(repos: Vec<RepoRow>, operation: F) -> Vec<(bool, String)>
+where
+    F: Fn(&RepoRow) -> (bool, String) + Copy + Send + 'static,
+{
+    let mut results = Vec::with_capacity(repos.len());
+    for batch in repos.chunks(SYNC_CONCURRENCY) {
+        let handles: Vec<_> = batch
+            .iter()
+            .cloned()
+            .map(|repo| {
+                let repo_key = repo.repo_key.clone();
+                (repo_key, thread::spawn(move || operation(&repo)))
+            })
+            .collect();
+        for (repo_key, handle) in handles {
+            results.push(
+                handle
+                    .join()
+                    .unwrap_or_else(|_| (false, format!("fail {repo_key}: sync worker panicked"))),
+            );
+        }
+    }
+    results
+}
+
 fn run_auto_sync(repos: &[RepoRow]) {
     let mut ok = 0;
     let mut skipped_or_failed = 0;
-    for repo in repos {
-        let (success, msg) = auto_sync_repo(repo);
+    for (success, msg) in run_parallel_sync(repos.to_vec(), auto_sync_repo) {
         if success {
             ok += 1;
         } else {
@@ -973,15 +998,17 @@ fn sync_progress(done: usize, total: usize) -> String {
 }
 
 fn run_sync(repos: &[RepoRow], sync: &SyncArgs) {
-    let selected: Vec<&RepoRow> = repos
+    let selected: Vec<RepoRow> = repos
         .iter()
         .filter(|repo| selected_for_sync(repo, sync))
+        .cloned()
         .collect();
     let total = selected.len();
+    let reset = sync.reset;
+    let results = run_parallel_sync(selected, move |repo| sync_repo(repo, reset, true));
     let mut ok = 0;
     let mut skipped_or_failed = 0;
-    for (index, repo) in selected.into_iter().enumerate() {
-        let (success, msg) = sync_repo(repo, sync.reset, true);
+    for (index, (success, msg)) in results.into_iter().enumerate() {
         if success {
             ok += 1;
         } else {
@@ -1352,16 +1379,11 @@ fn run_tui(
                         }
                     }
                     KeyCode::Char('S') => {
-                        let mut ok = 0;
-                        let mut skipped = 0;
-                        for repo in &app.repos {
-                            let (success, _) = sync_repo(repo, false, false);
-                            if success {
-                                ok += 1;
-                            } else {
-                                skipped += 1;
-                            }
-                        }
+                        let results = run_parallel_sync(app.repos.clone(), |repo| {
+                            sync_repo(repo, false, false)
+                        });
+                        let ok = results.iter().filter(|(success, _)| *success).count();
+                        let skipped = results.len() - ok;
                         app.message = format!("sync all safe: {ok} ok, {skipped} skipped/failed");
                         if let Ok(next) = reload_app(config, args, cache_path) {
                             let selected = app.selected.min(next.repos.len().saturating_sub(1));
