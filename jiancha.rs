@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Terminal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -997,6 +997,10 @@ fn sync_progress(done: usize, total: usize) -> String {
     format!("{}{}", "#".repeat(filled), "-".repeat(WIDTH - filled))
 }
 
+fn render_sync_progress(done: usize, total: usize) -> String {
+    format!("[{}] {done}/{total}", sync_progress(done, total))
+}
+
 fn run_sync(repos: &[RepoRow], sync: &SyncArgs) {
     let selected: Vec<RepoRow> = repos
         .iter()
@@ -1005,21 +1009,60 @@ fn run_sync(repos: &[RepoRow], sync: &SyncArgs) {
         .collect();
     let total = selected.len();
     let reset = sync.reset;
-    let results = run_parallel_sync(selected, move |repo| sync_repo(repo, reset, true));
+    let interactive = io::stdout().is_terminal();
+    let mut done = 0;
     let mut ok = 0;
     let mut skipped_or_failed = 0;
-    for (index, (success, msg)) in results.into_iter().enumerate() {
-        if success {
-            ok += 1;
-        } else {
-            skipped_or_failed += 1;
+
+    if interactive && total > 0 {
+        print!("{} syncing...", render_sync_progress(done, total));
+        io::stdout().flush().expect("stdout should be writable");
+    }
+
+    // Receive a result as each worker finishes, rather than waiting for earlier
+    // repos in the batch. This keeps the progress bar meaningful with concurrent
+    // pull/reset operations.
+    for batch in selected.chunks(SYNC_CONCURRENCY) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut handles = Vec::with_capacity(batch.len());
+        for repo in batch.iter().cloned() {
+            let sender = sender.clone();
+            let repo_key = repo.repo_key.clone();
+            handles.push(thread::spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    sync_repo(&repo, reset, true)
+                }))
+                .unwrap_or_else(|_| (false, format!("fail {repo_key}: sync worker panicked")));
+                let _ = sender.send(result);
+            }));
         }
-        println!(
-            "[{}] {}/{} {msg}",
-            sync_progress(index + 1, total),
-            index + 1,
-            total
-        );
+        drop(sender);
+
+        for (success, msg) in receiver {
+            done += 1;
+            if success {
+                ok += 1;
+            } else {
+                skipped_or_failed += 1;
+            }
+
+            if interactive {
+                print!(
+                    "\r\x1b[2K{msg}\n{} syncing...",
+                    render_sync_progress(done, total)
+                );
+                io::stdout().flush().expect("stdout should be writable");
+            } else {
+                println!("[{}] {msg}", render_sync_progress(done, total));
+            }
+        }
+        for handle in handles {
+            let _ = handle.join();
+        }
+    }
+
+    if interactive && total > 0 {
+        print!("\r\x1b[2K{}\n", render_sync_progress(done, total));
     }
     println!("done: {ok} ok, {skipped_or_failed} skipped/failed");
 }
