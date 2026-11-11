@@ -787,7 +787,13 @@ fn repo_error(
     }
 }
 
-fn refresh_remote_status(repos: &mut [RepoRow], args: &Args, cache: &mut Cache, now: u64) {
+fn refresh_remote_status(
+    repos: &mut [RepoRow],
+    args: &Args,
+    cache: &mut Cache,
+    now: u64,
+    show_progress: bool,
+) {
     let force_session_refresh = cache
         .last_run_at
         .map(|last_run_at| now.saturating_sub(last_run_at) > SESSION_GAP_REFRESH_SECS)
@@ -815,15 +821,30 @@ fn refresh_remote_status(repos: &mut [RepoRow], args: &Args, cache: &mut Cache, 
         }
         fetch_indices.push(idx);
     }
-    let handles: Vec<(usize, thread::JoinHandle<FetchStatus>)> = fetch_indices
+    let total = fetch_indices.len();
+    let interactive = show_progress && io::stdout().is_terminal();
+    if interactive && total > 0 {
+        print!("{} fetching...", render_sync_progress(0, total));
+        io::stdout().flush().expect("stdout should be writable");
+    }
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let handles: Vec<_> = fetch_indices
         .into_iter()
         .map(|idx| {
             let dir = repos[idx].directory.clone();
-            (idx, thread::spawn(move || run_git_fetch(&dir)))
+            let sender = sender.clone();
+            thread::spawn(move || {
+                let status = run_git_fetch(&dir);
+                let _ = sender.send((idx, status));
+            })
         })
         .collect();
-    for (idx, handle) in handles {
-        let status = handle.join().unwrap_or(FetchStatus::Error);
+    drop(sender);
+
+    let mut done = 0;
+    for (idx, status) in receiver {
+        done += 1;
         repos[idx].fetch_status = status.clone();
         cache.repos.insert(
             repos[idx].directory.clone(),
@@ -835,6 +856,16 @@ fn refresh_remote_status(repos: &mut [RepoRow], args: &Args, cache: &mut Cache, 
                 fetch_status: status,
             },
         );
+        if interactive {
+            print!("\r{} fetching...", render_sync_progress(done, total));
+            io::stdout().flush().expect("stdout should be writable");
+        }
+    }
+    for handle in handles {
+        let _ = handle.join();
+    }
+    if interactive && total > 0 {
+        print!("\r\x1b[2K{}\n", render_sync_progress(done, total));
     }
     cache.last_run_at = Some(now);
 }
@@ -1358,7 +1389,7 @@ fn reload_app(
 ) -> Result<App, Box<dyn std::error::Error>> {
     let mut cache = load_cache(cache_path);
     let (mut repos, _) = load_repos(config);
-    refresh_remote_status(&mut repos, args, &mut cache, now_secs());
+    refresh_remote_status(&mut repos, args, &mut cache, now_secs(), false);
     save_cache(cache_path, &cache)?;
     Ok(App {
         repos,
@@ -1461,7 +1492,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match &args.command {
         CommandMode::Check => {
-            refresh_remote_status(&mut repos, &args, &mut cache, now_secs());
+            refresh_remote_status(&mut repos, &args, &mut cache, now_secs(), true);
             save_cache(&cache_path, &cache)?;
             match args.output {
                 OutputMode::Full => print!("{}", render_all(&repos, &sections)),
