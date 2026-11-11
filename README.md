@@ -72,15 +72,16 @@ jiancha --summary  # fleet summary + group exceptions
 jiancha --fresh    # force fetch remotes, ignoring cache
 jiancha --refresh  # alias for --fresh
 jiancha --offline  # never fetch; use only fresh cached remote state
+jiancha --sync     # sync configured repos; reset after a failed fast-forward pull
 ```
 
 Hybrid UI / sync commands:
 
 ```sh
 jiancha tui                # modal grouped repo browser
-jiancha sync --all         # safe sync all repos
-jiancha sync --group rdd   # safe sync one group
-jiancha sync --repo tasks  # safe sync one repo
+jiancha sync --pull        # fast-forward pull all configured repos
+jiancha sync --reset       # hard-reset all configured repos to their remotes
+jiancha sync --group rdd   # fast-forward pull one group
 ```
 
 TUI keys:
@@ -110,29 +111,32 @@ git fetch --all --prune
 git reset --hard origin/<working_branch>
 ```
 
-Config format:
+Configuration is read from `$XDG_CONFIG_HOME/jiancha/config.yaml` (or `~/.config/jiancha/config.yaml`).
 
-```toml
-[[group]]
-name = "context"
+`jiancha --sync` uses an explicit `sync` branch. Repos without that key are
+shown by normal `jiancha`, but skipped by `--sync`.
 
-  [[group.repo]]
-  name = "sw"
-  fs = "/Users/zach/Documents/zv/notes/sw"
-  working_branch = "sprint"
-
-[[group]]
-name = "rdd"
-
-  [[group.repo]]
-  name = "corkboard"
-  fs = "/Users/zach/Documents/zv/projects/tools/corkboard"
-  working_branch = "main"
-  remote = "origin"
-  allow_reset = true
+```yaml
+notes:
+  sw:
+    path: /Users/zach/Documents/zv/notes/sw
+    sync: sprint
+  tasks:
+    path: /Users/zach/Documents/zv/personal/corkboard-tasks
+    sync: main
+colligo:
+  eng:
+    path: /Users/zach/Documents/zv/work/colligo/docs/eng
+    sync: main
 ```
 
-The previous `[group] repo = "/path"` config style still works. Sync commands skip repos that do not define `working_branch`.
+Each configured repo is fetched, fast-forwarded, then hard-reset to
+`origin/<sync>` when the pull cannot fast-forward (for example after a
+force-push):
+
+`--sync` only operates when the checked-out
+branch matches the configured branch; its reset deliberately discards local
+working-tree changes and commits.
 
 This is tuned for bouncing between machines every few hours: normal repeated checks avoid network fetches, while checks after a long gap usually refresh remote truth.
 
@@ -165,29 +169,57 @@ CLI still works:
    q/Esc     quit
  ```
 
-# new sync
 
- New sync CLI:
+# sync
 
- ```sh
-   jiancha sync --all
-   jiancha sync --group rdd
-   jiancha sync --repo tasks
-   jiancha sync --all --reset -y
- ```
+thinking of a new flag for /Users/zach/Documents/zv/projects/tools/jian-cha
 
- config
+```sh
+jiancha --sync
+```
 
- Supports new shape:
+99% of my usage is: work on desktop|laptop, switch to other machine later, and try to remember what repos need to be updated:
+```sh
+jiancha  # see what needs to be updated
 
- ```toml
-   [[group]]
-   name = "context"
+# cd around to various repos
+# if I can merge cleanly
+git pull
 
-     [[group.repo]]
-     name = "sw"
-     fs = "/Users/zach/Documents/zv/notes/sw"
-     working_branch = "sprint"
- ```
+# if I can't merge, it's almost always bc there's a force push bc I didn't want to make a new commit
+# so merge strat is just "`remote $BRANCH (sprint | main | master)" depending on what repo we're talking about
+git fetch --all; git reset --hard origin/sprint
+git fetch --all; git reset --hard origin/main
+git fetch --all; git reset --hard origin/master
 
- Legacy config still works. Sync skips legacy repos without working_branch.
+# double check I've got everything
+jiancha --fresh
+```
+
+so I think we can resolve this with a code change + update the config:
+
+```yaml
+notes:
+  sw:
+    path: /Users/zach/Documents/zv/notes/sw
+    sync: sprint
+  tasks:
+    path: /Users/zach/Documents/zv/personal/corkboard-tasks
+    sync: main
+colligo:
+  eng:
+    path: /Users/zach/Documents/zv/work/colligo/docs/eng
+    sync: main
+```
+
+## cmds
+
+```sh
+jiancha sync --group rdd
+
+# git pull for all
+jiancha sync --pull
+
+# hard-resets every configured working_branch repo to its remote branch
+jiancha sync --reset
+```

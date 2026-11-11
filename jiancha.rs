@@ -29,7 +29,14 @@ struct Config {
 #[derive(Debug, Serialize, Deserialize)]
 struct LegacyConfig {
     #[serde(flatten)]
-    sections: IndexMap<String, IndexMap<String, String>>,
+    sections: IndexMap<String, IndexMap<String, LegacyRepoConfig>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum LegacyRepoConfig {
+    Path(String),
+    Sync { path: String, sync: Option<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +51,8 @@ struct RepoConfig {
     name: String,
     fs: String,
     working_branch: Option<String>,
+    /// Branch that `jiancha --sync` should reconcile with its remote.
+    sync: Option<String>,
     remote: Option<String>,
     allow_reset: Option<bool>,
 }
@@ -92,15 +101,14 @@ enum CommandMode {
     Check,
     Tui,
     Sync(SyncArgs),
+    AutoSync,
 }
 
 #[derive(Debug, Default)]
 struct SyncArgs {
-    all: bool,
     group: Option<String>,
-    repo: Option<String>,
+    pull_requested: bool,
     reset: bool,
-    yes: bool,
 }
 
 const REMOTE_TTL_SECS: u64 = 30 * 60;
@@ -113,6 +121,7 @@ struct RepoRow {
     group: String,
     directory: String,
     working_branch: Option<String>,
+    sync_branch: Option<String>,
     remote: Option<String>,
     allow_reset: bool,
     branch: Option<String>,
@@ -224,17 +233,28 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     } else {
         return Err("HOME not set".into());
     };
-    let path = config_dir.join("jiancha").join("config.toml");
-    let contents = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-    parse_config(&contents)
+    let config_path = config_dir.join("jiancha");
+    let yaml_path = config_path.join("config.yaml");
+    match std::fs::read_to_string(&yaml_path) {
+        Ok(contents) => parse_yaml_config(&contents),
+        Err(yaml_error) if yaml_error.kind() == io::ErrorKind::NotFound => {
+            let toml_path = config_path.join("config.toml");
+            let contents = std::fs::read_to_string(&toml_path).map_err(|toml_error| {
+                format!(
+                    "Failed to read {} ({}) or {} ({})",
+                    yaml_path.display(),
+                    yaml_error,
+                    toml_path.display(),
+                    toml_error
+                )
+            })?;
+            parse_toml_config(&contents)
+        }
+        Err(e) => Err(format!("Failed to read {}: {}", yaml_path.display(), e).into()),
+    }
 }
 
-fn parse_config(contents: &str) -> Result<Config, Box<dyn std::error::Error>> {
-    if let Ok(config) = toml::from_str::<Config>(contents) {
-        return Ok(config);
-    }
-    let legacy: LegacyConfig = toml::from_str(contents)?;
+fn legacy_to_config(legacy: LegacyConfig) -> Config {
     let group = legacy
         .sections
         .into_iter()
@@ -242,17 +262,40 @@ fn parse_config(contents: &str) -> Result<Config, Box<dyn std::error::Error>> {
             name: group_name,
             repo: repos
                 .into_iter()
-                .map(|(repo_name, fs)| RepoConfig {
-                    name: repo_name,
-                    fs,
-                    working_branch: None,
-                    remote: None,
-                    allow_reset: None,
+                .map(|(repo_name, repo)| {
+                    let (fs, sync) = match repo {
+                        LegacyRepoConfig::Path(path) => (path, None),
+                        LegacyRepoConfig::Sync { path, sync } => (path, sync),
+                    };
+                    RepoConfig {
+                        name: repo_name,
+                        fs,
+                        working_branch: None,
+                        sync,
+                        remote: None,
+                        allow_reset: None,
+                    }
                 })
                 .collect(),
         })
         .collect();
-    Ok(Config { group })
+    Config { group }
+}
+
+fn parse_yaml_config(contents: &str) -> Result<Config, Box<dyn std::error::Error>> {
+    if let Ok(config) = serde_yaml::from_str::<Config>(contents) {
+        return Ok(config);
+    }
+    let legacy: LegacyConfig = serde_yaml::from_str(contents)?;
+    Ok(legacy_to_config(legacy))
+}
+
+fn parse_toml_config(contents: &str) -> Result<Config, Box<dyn std::error::Error>> {
+    if let Ok(config) = toml::from_str::<Config>(contents) {
+        return Ok(config);
+    }
+    let legacy: LegacyConfig = toml::from_str(contents)?;
+    Ok(legacy_to_config(legacy))
 }
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
@@ -275,22 +318,25 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
             let mut sync = SyncArgs::default();
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
-                    "--all" => sync.all = true,
                     "--group" => sync.group = iter.next(),
-                    "--repo" => sync.repo = iter.next(),
-                    "--reset" => sync.reset = true,
-                    "--yes" | "-y" => sync.yes = true,
+                    "--pull" => {
+                        if sync.reset {
+                            return Err("--pull and --reset cannot be used together".into());
+                        }
+                        sync.pull_requested = true;
+                    }
+                    "--reset" => {
+                        if sync.pull_requested {
+                            return Err("--pull and --reset cannot be used together".into());
+                        }
+                        sync.reset = true;
+                    }
                     "-h" | "--help" => {
-                        println!(
-                            "Usage: jiancha sync [--all|--group NAME|--repo NAME] [--reset --yes]"
-                        );
+                        println!("Usage: jiancha sync [--group NAME] [--pull|--reset]");
                         std::process::exit(0);
                     }
                     _ => return Err(format!("Unknown sync argument: {arg}").into()),
                 }
-            }
-            if !sync.all && sync.group.is_none() && sync.repo.is_none() {
-                sync.all = true;
             }
             args.command = CommandMode::Sync(sync);
             return Ok(args);
@@ -302,12 +348,15 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--fresh" | "--refresh" => args.fresh = true,
             "--offline" => args.offline = true,
+            "--sync" => args.command = CommandMode::AutoSync,
             "--compact" => args.output = OutputMode::Compact,
             "--summary" => args.output = OutputMode::Summary,
             "-h" | "--help" => {
-                println!("Usage: jiancha [--compact|--summary] [--fresh|--refresh] [--offline]");
+                println!(
+                    "Usage: jiancha [--compact|--summary] [--fresh|--refresh] [--offline] [--sync]"
+                );
                 println!("       jiancha tui");
-                println!("       jiancha sync [--all|--group NAME|--repo NAME] [--reset --yes]");
+                println!("       jiancha sync [--group NAME] [--pull|--reset]");
                 std::process::exit(0);
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
@@ -697,6 +746,7 @@ fn load_repos(config: &Config) -> (Vec<RepoRow>, IndexMap<String, Vec<usize>>) {
                 group: group.name.clone(),
                 directory: dir_s,
                 working_branch: repo_cfg.working_branch.clone(),
+                sync_branch: repo_cfg.sync.clone(),
                 remote: repo_cfg.remote.clone(),
                 allow_reset: repo_cfg.allow_reset.unwrap_or(false),
                 branch,
@@ -723,6 +773,7 @@ fn repo_error(
         group: group.name.clone(),
         directory,
         working_branch: repo_cfg.working_branch.clone(),
+        sync_branch: repo_cfg.sync.clone(),
         remote: repo_cfg.remote.clone(),
         allow_reset: repo_cfg.allow_reset.unwrap_or(false),
         branch: None,
@@ -788,9 +839,10 @@ fn refresh_remote_status(repos: &mut [RepoRow], args: &Args, cache: &mut Cache, 
 }
 
 fn selected_for_sync(repo: &RepoRow, sync: &SyncArgs) -> bool {
-    sync.all
-        || sync.group.as_deref() == Some(repo.group.as_str())
-        || sync.repo.as_deref() == Some(repo.repo_key.as_str())
+    sync.group
+        .as_deref()
+        .map(|group| group == repo.group.as_str())
+        .unwrap_or(true)
 }
 
 fn sync_repo(repo: &RepoRow, reset: bool, yes: bool) -> (bool, String) {
@@ -849,11 +901,68 @@ fn sync_repo(repo: &RepoRow, reset: bool, yes: bool) -> (bool, String) {
     }
 }
 
+fn auto_sync_repo(repo: &RepoRow) -> (bool, String) {
+    if let Some(err) = &repo.local_error {
+        return (false, format!("skip {}: {}", repo.repo_key, err));
+    }
+    let branch = match &repo.branch {
+        Some(branch) => branch,
+        None => return (false, format!("skip {}: unknown branch", repo.repo_key)),
+    };
+    let sync_branch = match &repo.sync_branch {
+        Some(branch) => branch,
+        None => {
+            return (
+                false,
+                format!("skip {}: missing sync branch", repo.repo_key),
+            )
+        }
+    };
+    if branch != sync_branch {
+        return (
+            false,
+            format!(
+                "skip {}: on {}, expected {}",
+                repo.repo_key, branch, sync_branch
+            ),
+        );
+    }
+
+    let remote = repo.remote.as_deref().unwrap_or("origin");
+    if let Err(e) = git_status(&repo.directory, &["fetch", "--all", "--prune"]) {
+        return (false, format!("fail {}: fetch: {}", repo.repo_key, e));
+    }
+    if git_status(&repo.directory, &["pull", "--ff-only"]).is_ok() {
+        return (true, format!("sync {}", repo.repo_key));
+    }
+
+    let target = format!("{remote}/{sync_branch}");
+    match git_status(&repo.directory, &["reset", "--hard", &target]) {
+        Ok(_) => (true, format!("reset {} -> {}", repo.repo_key, target)),
+        Err(e) => (false, format!("fail {}: reset: {}", repo.repo_key, e)),
+    }
+}
+
+fn run_auto_sync(repos: &[RepoRow]) {
+    let mut ok = 0;
+    let mut skipped_or_failed = 0;
+    for repo in repos {
+        let (success, msg) = auto_sync_repo(repo);
+        if success {
+            ok += 1;
+        } else {
+            skipped_or_failed += 1;
+        }
+        println!("{msg}");
+    }
+    println!("done: {ok} ok, {skipped_or_failed} skipped/failed");
+}
+
 fn run_sync(repos: &[RepoRow], sync: &SyncArgs) {
     let mut ok = 0;
     let mut skipped_or_failed = 0;
     for repo in repos.iter().filter(|r| selected_for_sync(r, sync)) {
-        let (success, msg) = sync_repo(repo, sync.reset, sync.yes);
+        let (success, msg) = sync_repo(repo, sync.reset, true);
         if success {
             ok += 1;
         } else {
@@ -1273,6 +1382,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         CommandMode::Tui => run_tui(&config, &args, &cache_path)?,
         CommandMode::Sync(sync) => run_sync(&repos, sync),
+        CommandMode::AutoSync => run_auto_sync(&repos),
     }
     Ok(())
 }
