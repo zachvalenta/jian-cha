@@ -849,33 +849,33 @@ fn sync_repo(repo: &RepoRow, reset: bool, yes: bool) -> (bool, String) {
     if let Some(err) = &repo.local_error {
         return (false, format!("skip {}: {}", repo.repo_key, err));
     }
-    let branch = match &repo.branch {
-        Some(b) => b,
-        None => return (false, format!("skip {}: unknown branch", repo.repo_key)),
-    };
-    let working_branch = match &repo.working_branch {
-        Some(wb) => wb,
-        None => {
-            return (
-                false,
-                format!("skip {}: missing working_branch", repo.repo_key),
-            )
-        }
-    };
-    if branch != working_branch {
-        return (
-            false,
-            format!(
-                "skip {}: on {}, expected {}",
-                repo.repo_key, branch, working_branch
-            ),
-        );
-    }
     let remote = repo.remote.as_deref().unwrap_or("origin");
     if let Err(e) = git_status(&repo.directory, &["fetch", "--all", "--prune"]) {
         return (false, format!("fail {}: fetch: {}", repo.repo_key, e));
     }
     if reset {
+        let branch = match &repo.branch {
+            Some(branch) => branch,
+            None => return (false, format!("skip {}: unknown branch", repo.repo_key)),
+        };
+        let working_branch = match &repo.working_branch {
+            Some(branch) => branch,
+            None => {
+                return (
+                    false,
+                    format!("skip {}: missing working_branch", repo.repo_key),
+                )
+            }
+        };
+        if branch != working_branch {
+            return (
+                false,
+                format!(
+                    "skip {}: on {}, expected {}",
+                    repo.repo_key, branch, working_branch
+                ),
+            );
+        }
         if !repo.allow_reset && !yes {
             return (
                 false,
