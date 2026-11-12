@@ -268,10 +268,13 @@ fn legacy_to_config(legacy: LegacyConfig) -> Config {
                         LegacyRepoConfig::Path(path) => (path, None),
                         LegacyRepoConfig::Sync { path, sync } => (path, sync),
                     };
+                    // Legacy configs used `sync` as the only branch setting.
+                    // Preserve that meaning for both sync entry points, including
+                    // `sync --reset`, which checks `working_branch`.
                     RepoConfig {
                         name: repo_name,
                         fs,
-                        working_branch: None,
+                        working_branch: sync.clone(),
                         sync,
                         remote: None,
                         allow_reset: None,
@@ -1527,5 +1530,15 @@ mod tests {
         assert_eq!(sync_progress(0, 4), "--------------------");
         assert_eq!(sync_progress(2, 4), "##########----------");
         assert_eq!(sync_progress(4, 4), "####################");
+    }
+
+    #[test]
+    fn legacy_sync_branch_is_also_the_working_branch() {
+        let config = parse_yaml_config("notes:\n  sw:\n    path: /notes/sw\n    sync: sprint\n")
+            .expect("legacy config should parse");
+        let repo = &config.group[0].repo[0];
+
+        assert_eq!(repo.sync.as_deref(), Some("sprint"));
+        assert_eq!(repo.working_branch.as_deref(), Some("sprint"));
     }
 }
