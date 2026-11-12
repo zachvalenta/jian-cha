@@ -84,7 +84,9 @@ jiancha sync --reset       # hard-reset all configured repos to their remotes
 jiancha sync --group rdd   # fast-forward pull one group
 ```
 
-Sync operations run up to 8 repositories concurrently.
+Sync operations run up to 8 repositories concurrently. After `sync --pull` or
+`sync --reset`, jiancha refreshes and saves remote status for the post-sync
+working trees, so the next normal `jiancha` run uses fresh cached status.
 
 TUI keys:
 

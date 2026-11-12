@@ -1506,9 +1506,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CommandMode::Tui => run_tui(&config, &args, &cache_path)?,
         CommandMode::Sync(sync) => {
             run_sync(&repos, sync);
-            // `sync` fetches and may advance HEAD, so cached remote counts no
-            // longer describe the working tree. The next normal check refreshes.
-            let _ = std::fs::remove_file(&cache_path);
+
+            // Sync fetches and can advance HEAD. Rebuild the rows and force a
+            // refresh so the cache describes the post-sync working trees; the
+            // following normal check can therefore use it without refetching.
+            let (mut synced_repos, _) = load_repos(&config);
+            let refresh_args = Args {
+                fresh: true,
+                offline: false,
+                output: OutputMode::Full,
+                command: CommandMode::Check,
+            };
+            refresh_remote_status(
+                &mut synced_repos,
+                &refresh_args,
+                &mut cache,
+                now_secs(),
+                false,
+            );
+            save_cache(&cache_path, &cache)?;
         }
         CommandMode::AutoSync => run_auto_sync(&repos),
     }
